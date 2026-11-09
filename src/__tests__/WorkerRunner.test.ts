@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { RUNTIME_DROPPED_RUN_GRACE_MS } from "../appConstants";
+import { RUNTIME_DROPPED_RUN_GRACE_MS, RUNTIME_MAX_IMAGE_CHARS } from "../appConstants";
 import {
 	RuntimeRunners,
 	WorkerRunner,
@@ -124,11 +124,25 @@ describe("WorkerRunner", () => {
 		runner.run("a", {}, a.listener);
 		worker().send({ type: "output", runId: 1, stream: "stdout", text: "hi" });
 		worker().send({ type: "output", runId: 99, stream: "stdout", text: "stale" });
+		worker().send({ type: "image", runId: 1, png: "iVBO" });
 		worker().finish(1, { timings: { run: 4 } });
 		expect(a.events).toEqual([
 			{ type: "started" },
 			{ type: "output", stream: "stdout", text: "hi" },
+			{ type: "image", src: "data:image/png;base64,iVBO" },
 			{ type: "done", ok: true, error: undefined, timings: { run: 4 } },
+		]);
+	});
+
+	it("drops an image that is not a string or is too large", () => {
+		const a = record();
+		runner.run("a", {}, a.listener);
+		worker().send({ type: "image", runId: 1, png: 42 });
+		worker().send({ type: "image", runId: 1, png: "x".repeat(RUNTIME_MAX_IMAGE_CHARS + 1) });
+		worker().send({ type: "image", runId: 1, png: "ok" });
+		expect(a.events).toEqual([
+			{ type: "started" },
+			{ type: "image", src: "data:image/png;base64,ok" },
 		]);
 	});
 

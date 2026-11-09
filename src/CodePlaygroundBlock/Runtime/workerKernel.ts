@@ -1,7 +1,11 @@
 import type { PlaygroundRuntime } from "CodePlaygroundBlock/Runtime/PlaygroundRuntime";
 import type { WorkerLike } from "CodePlaygroundBlock/Runtime/WorkerRunner";
 import { createSandboxedWorker } from "CodePlaygroundBlock/Runtime/sandboxedWorker";
-import { RUNTIME_MAX_OUTPUT_LINES } from "appConstants";
+import {
+	RUNTIME_MAX_IMAGE_CHARS,
+	RUNTIME_MAX_OUTPUT_IMAGES,
+	RUNTIME_MAX_OUTPUT_LINES,
+} from "appConstants";
 
 /**
  * The worker script of a runtime: the shared kernel around the runtime's
@@ -29,6 +33,11 @@ import { RUNTIME_MAX_OUTPUT_LINES } from "appConstants";
  *   an endless loop of prints cannot flood the plugin with messages.
  * - `output.bytes(stream, buffer)`: the same for UTF-8 bytes. It returns
  *   the byte count, as engine write handlers expect.
+ * - `output.image(png)`: shows a PNG image (base64 text) after the text
+ *   printed so far. A run shows RUNTIME_MAX_OUTPUT_IMAGES images, each up
+ *   to RUNTIME_MAX_IMAGE_CHARS characters. It prints one note to stderr
+ *   for each kind of image it drops. After the line limit, the output is
+ *   truncated: images drop too, with no note.
  * - `job.blockId`, `job.files` (path to code, with the entry file).
  * - `job.status(text)`: shows text in the block's toolbar.
  * - `job.time(label, fn)`: runs `fn` and adds its duration to the timings.
@@ -47,6 +56,8 @@ const NODE_ACCESS =
 const ENTRY = ${JSON.stringify(runtime.entry)};
 const ENGINE = ${JSON.stringify(runtime.engineName)};
 const MAX_LINES = ${JSON.stringify(RUNTIME_MAX_OUTPUT_LINES)};
+const MAX_IMAGES = ${JSON.stringify(RUNTIME_MAX_OUTPUT_IMAGES)};
+const MAX_IMAGE_CHARS = ${JSON.stringify(RUNTIME_MAX_IMAGE_CHARS)};
 let currentRunId = 0;
 let cancelledRunId = 0;
 let loading = null;
@@ -59,6 +70,10 @@ const partial = { stdout: "", stderr: "" };
 // Lines sent in the current run. The line after MAX_LINES is the last one
 // sent: the block marks its output as truncated when it gets it.
 let sentLines = 0;
+// Images sent in the current run.
+let sentImages = 0;
+// The current run printed the note about a too large image.
+let notedLargeImage = false;
 
 const postLine = (stream, text) => {
 	if (sentLines > MAX_LINES) return;
@@ -75,6 +90,29 @@ const output = {
 	bytes(stream, buffer) {
 		output.text(stream, decoders[stream].decode(buffer, { stream: true }));
 		return buffer.length;
+	},
+	image(png) {
+		if (typeof png !== "string") return;
+		// The text printed before the image shows before it.
+		output.flush();
+		// The output is truncated: nothing after the cut shows.
+		if (sentLines > MAX_LINES) return;
+		if (sentImages >= MAX_IMAGES) {
+			if (sentImages === MAX_IMAGES) {
+				postLine("stderr", "Only the first " + MAX_IMAGES + " images show.");
+			}
+			sentImages += 1;
+			return;
+		}
+		if (png.length > MAX_IMAGE_CHARS) {
+			if (!notedLargeImage) {
+				notedLargeImage = true;
+				postLine("stderr", "An image is too large to show. Make the figure smaller or lower its dpi.");
+			}
+			return;
+		}
+		sentImages += 1;
+		post({ type: "image", runId: currentRunId, png });
 	},
 	// Sends a line that has no newline yet, so it shows in its own run.
 	flush() {
@@ -93,6 +131,8 @@ ${runtime.workerSource}
 async function run({ runId, blockId, files }) {
 	currentRunId = runId;
 	sentLines = 0;
+	sentImages = 0;
+	notedLargeImage = false;
 	if (NODE_ACCESS) {
 		post({
 			type: "done", runId, ok: false, fatal: true, timings: {},

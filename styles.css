@@ -312,6 +312,14 @@ div.sp-tab-container {
     color: var(--sp-colors-error);
 }
 
+/* A matplotlib figure. Its natural size, smaller in a narrow block. */
+.cp-runtime-image {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 4px 0;
+}
+
 /* Positioning context for the absolutely-placed "Manage files" button. Also
    passes the editor box height down so the editor can fill it. */
 .cp-editor-wrap {

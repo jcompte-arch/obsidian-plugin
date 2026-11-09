@@ -74,6 +74,25 @@ describe("cleanTraceback", () => {
 		);
 	});
 
+	it("drops the frames of the plugin's matplotlib backend", () => {
+		const message = [
+			"Traceback (most recent call last):",
+			'  File "/home/pyodide/.code-playground/_cp_matplotlib.py", line 34, in show',
+			'    figure.savefig(buffer, format="png", bbox_inches="tight")',
+			'  File "/lib/python3.13/site-packages/matplotlib/figure.py", line 3490, in savefig',
+			"    self.canvas.print_figure(fname, **kwargs)",
+			"ValueError: Unknown symbol: \\badcmd",
+		].join("\n");
+		expect(cleanTraceback(message, folder)).toBe(
+			[
+				"Traceback (most recent call last):",
+				'  File "/lib/python3.13/site-packages/matplotlib/figure.py", line 3490, in savefig',
+				"    self.canvas.print_figure(fname, **kwargs)",
+				"ValueError: Unknown symbol: \\badcmd",
+			].join("\n"),
+		);
+	});
+
 	it("leaves other messages unchanged", () => {
 		expect(cleanTraceback("Could not load Pyodide.", folder)).toBe(
 			"Could not load Pyodide.",

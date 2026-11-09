@@ -1,6 +1,6 @@
 import type { PlaygroundRuntime } from "CodePlaygroundBlock/Runtime/PlaygroundRuntime";
 import { runtimeWorkerFactory } from "CodePlaygroundBlock/Runtime/workerKernel";
-import { RUNTIME_DROPPED_RUN_GRACE_MS } from "appConstants";
+import { RUNTIME_DROPPED_RUN_GRACE_MS, RUNTIME_MAX_IMAGE_CHARS } from "appConstants";
 
 export type OutputStream = "stdout" | "stderr";
 
@@ -16,6 +16,8 @@ export type RunEvent =
 	| { type: "started" }
 	| { type: "status"; text: string }
 	| { type: "output"; stream: OutputStream; text: string }
+	/** `src` is a data URL, ready for an img element. */
+	| { type: "image"; src: string }
 	| { type: "done"; ok: boolean; error?: string; timings: RunTimings }
 	| { type: "stopped" };
 
@@ -24,6 +26,8 @@ type WorkerMessage =
 	| { type: "running"; runId: number }
 	| { type: "status"; runId: number; text: string }
 	| { type: "output"; runId: number; stream: OutputStream; text: string }
+	/** `png` is base64 PNG data. */
+	| { type: "image"; runId: number; png: string }
 	| {
 			type: "done";
 			runId: number;
@@ -210,6 +214,20 @@ export class WorkerRunner {
 					type: "output",
 					stream: message.stream,
 					text: message.text,
+				});
+				break;
+			case "image":
+				// The block's code can post messages itself: check the image
+				// here too, not only in the worker.
+				if (
+					typeof message.png !== "string" ||
+					message.png.length > RUNTIME_MAX_IMAGE_CHARS
+				) {
+					break;
+				}
+				this.send(job, {
+					type: "image",
+					src: `data:image/png;base64,${message.png}`,
 				});
 				break;
 			case "done":

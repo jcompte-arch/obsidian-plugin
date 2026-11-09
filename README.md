@@ -169,6 +169,7 @@ A new block starts with a `/main.py` that prints the Python version. Python bloc
 
 - A block runs when its note opens, and again 0.5 s after you stop typing. **Run** runs it again.
 - The output pane replaces the preview. It shows stdout, then stderr and errors in red. A traceback starts at your code.
+- While a block runs again, its last output stays until the new run prints or ends.
 - The toolbar shows the timings, for example `Pyodide 1840 ms · packages 3 ms · run 12 ms`. `Pyodide … ms` shows only on the run that loaded Pyodide.
 - The output keeps 2000 lines. Later lines are dropped, and the pane shows that the output is truncated.
 - All Python blocks share one Pyodide, and run one at a time. While one block runs, the others show `Waiting for another block...`.
@@ -187,6 +188,24 @@ A new block starts with a `/main.py` that prints the Python version. Python bloc
   await micropip.install("cowsay")
   ```
 
+### Plots
+
+`matplotlib` figures show in the output pane as images:
+
+```python
+import matplotlib.pyplot as plt
+
+plt.plot([1, 2, 3, 4], [1, 4, 9, 16])
+plt.title("Squares")
+plt.show()
+```
+
+- `plt.show()` shows the open figures after the text printed so far.
+- `plt.show()` is optional. The figures that are still open at the end of the run show too, as in Jupyter. They also show after an error.
+- An empty figure does not show.
+- A run shows 50 images, each up to about 3.75 MB. The output shows a note when it drops an image.
+- Style changes such as `plt.style.use(...)` apply to their own run only.
+
 ### Sandbox
 
 Python runs in a Web Worker inside a sandboxed iframe (`sandbox="allow-scripts"`). The worker has an opaque origin, with no access to Obsidian, your vault or Node.js. If the worker can still reach Node.js, the block does not run and shows an error.
@@ -198,7 +217,7 @@ Python runs in a Web Worker inside a sandboxed iframe (`sandbox="allow-scripts"`
 ### Limitations
 
 - `input()` raises an error. The output pane has no keyboard input.
-- Python cannot draw into the note. `matplotlib` uses the `Agg` backend, so you can save a figure to bytes, but no plot shows.
+- Figures are static images. Zoom, widgets and animations do not work.
 - In Pyodide 0.29.0, `import numpy` on its own can fail. `pandas` and `matplotlib` still load numpy as a dependency.
 - Every Python block runs when its note opens, even blocks that are off screen.
 - A block with an endless loop keeps the other Python blocks waiting until you click **Stop**. It runs again each time its note opens.

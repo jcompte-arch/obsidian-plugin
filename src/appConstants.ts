@@ -63,6 +63,12 @@ export const CANONICAL_FENCE_NAME = "code-playground";
 /** Output lines a runtime block (e.g. Python) keeps. Later lines are dropped. */
 export const RUNTIME_MAX_OUTPUT_LINES = 2000;
 
+/** Images (e.g. matplotlib figures) a run shows. Later images are dropped. */
+export const RUNTIME_MAX_OUTPUT_IMAGES = 50;
+
+/** Largest image a run shows, in characters of base64 PNG data (about 3.75 MB). */
+export const RUNTIME_MAX_IMAGE_CHARS = 5_000_000;
+
 /**
  * Time a dropped run whose code started (e.g. its block closed) has to end
  * when another run waits. After that, it stops with its worker, and the

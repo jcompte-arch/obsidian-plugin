@@ -9,16 +9,38 @@ import type {
 	RunHandle,
 	RunTimings,
 } from "CodePlaygroundBlock/Runtime/WorkerRunner";
-import { RUNTIME_MAX_OUTPUT_LINES, RUNTIME_RERUN_DEBOUNCE_MS } from "appConstants";
+import {
+	RUNTIME_MAX_OUTPUT_IMAGES,
+	RUNTIME_MAX_OUTPUT_LINES,
+	RUNTIME_RERUN_DEBOUNCE_MS,
+} from "appConstants";
 
 export type OutputLine = { stream: OutputStream; text: string };
+
+/** An image of the output, e.g. a matplotlib figure. */
+export type OutputImage = {
+	/** The number of lines before the image. */
+	line: number;
+	/** A data URL. */
+	src: string;
+};
 
 export type RunState = {
 	phase: "queued" | "running" | "done" | "failed" | "stopped";
 	status: string;
 	lines: OutputLine[];
+	/**
+	 * Up to RUNTIME_MAX_OUTPUT_IMAGES. The worker caps them too, but the
+	 * block's code runs in the worker and can post messages itself.
+	 */
+	images: OutputImage[];
 	/** Lines after RUNTIME_MAX_OUTPUT_LINES were dropped. */
 	truncated: boolean;
+	/**
+	 * The output is the last run's: this run started, but it printed
+	 * nothing yet.
+	 */
+	stale: boolean;
 };
 
 export type RuntimeRun = RunState & {
@@ -32,7 +54,9 @@ export const INITIAL_RUN_STATE: RunState = {
 	phase: "queued",
 	status: "Waiting to run...",
 	lines: [],
+	images: [],
 	truncated: false,
+	stale: false,
 };
 
 /**
@@ -108,23 +132,41 @@ export function useRuntimeRun(
 export function reduceRunEvent(state: RunState, event: RunEvent): RunState {
 	switch (event.type) {
 		case "queued":
-			// Keep the last output until this run starts, so it does not flash.
+			// Keep the last output while this run waits, so it does not flash.
 			return {
 				...state,
 				phase: "queued",
 				status: "Waiting for another block...",
 			};
 		case "started":
-			return { phase: "running", status: "Starting...", lines: [], truncated: false };
+			// Keep the last output until this run prints or ends. A figure
+			// often comes at the end of its run: an empty output until then
+			// makes the figure flash on each run.
+			return { ...state, phase: "running", status: "Starting...", stale: true };
 		case "status":
 			return { ...state, status: event.text };
 		case "output":
-			return appendLine(state, { stream: event.stream, text: event.text });
+			return appendLine(withoutStaleOutput(state), {
+				stream: event.stream,
+				text: event.text,
+			});
+		case "image": {
+			const current = withoutStaleOutput(state);
+			if (current.images.length >= RUNTIME_MAX_OUTPUT_IMAGES) return current;
+			return {
+				...current,
+				images: [
+					...current.images,
+					{ line: current.lines.length, src: event.src },
+				],
+			};
+		}
 		case "done": {
+			const current = withoutStaleOutput(state);
 			const timing = formatTimings(event.timings);
-			if (event.ok) return { ...state, phase: "done", status: timing };
+			if (event.ok) return { ...current, phase: "done", status: timing };
 			const failed = {
-				...state,
+				...current,
 				phase: "failed" as const,
 				status: timing ? `Error · ${timing}` : "Error",
 			};
@@ -137,8 +179,36 @@ export function reduceRunEvent(state: RunState, event: RunEvent): RunState {
 					};
 		}
 		case "stopped":
-			return { ...state, phase: "stopped", status: "Stopped" };
+			return {
+				...withoutStaleOutput(state),
+				phase: "stopped",
+				status: "Stopped",
+			};
 	}
+}
+
+/** Drops the last run's output when this run prints or ends. */
+function withoutStaleOutput(state: RunState): RunState {
+	return state.stale
+		? { ...state, lines: [], images: [], truncated: false, stale: false }
+		: state;
+}
+
+/** The lines and the images of a run, in the order the run printed them. */
+export function outputItems({
+	lines,
+	images,
+}: Pick<RunState, "lines" | "images">): (OutputLine | OutputImage)[] {
+	if (images.length === 0) return lines;
+	const items: (OutputLine | OutputImage)[] = [];
+	let next = 0;
+	lines.forEach((line, index) => {
+		while (next < images.length && images[next]!.line <= index) {
+			items.push(images[next++]!);
+		}
+		items.push(line);
+	});
+	return items.concat(images.slice(next));
 }
 
 function appendLine(state: RunState, line: OutputLine): RunState {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildWorkerScript } from "../CodePlaygroundBlock/Runtime/workerKernel";
 import type { PlaygroundRuntime } from "../CodePlaygroundBlock/Runtime/PlaygroundRuntime";
-import { RUNTIME_MAX_OUTPUT_LINES } from "../appConstants";
+import { RUNTIME_MAX_OUTPUT_IMAGES, RUNTIME_MAX_OUTPUT_LINES } from "../appConstants";
 
 type Message = { type: string; runId: number; [key: string]: unknown };
 
@@ -120,6 +120,67 @@ describe("buildWorkerScript", () => {
 			"stdout:0",
 			"stdout:1",
 			"stderr:partial",
+		]);
+	});
+
+	it("sends an image after the text printed before it", async () => {
+		const run = startKernel(`
+			async function load() { return {}; }
+			async function execute() {
+				output.text("stdout", "a\\nb");
+				output.image("iVBO");
+				output.image(42);
+				output.text("stdout", "c\\n");
+			}
+		`);
+		const messages = await run(entryOnly);
+		const shown = messages
+			.filter((m) => m.type === "output" || m.type === "image")
+			.map((m) =>
+				m.type === "image"
+					? `image:${String(m.png)}`
+					: `${String(m.stream)}:${String(m.text)}`,
+			);
+		expect(shown).toEqual(["stdout:a", "stdout:b", "image:iVBO", "stdout:c"]);
+	});
+
+	it("drops the images past the limit and the images that are too large", async () => {
+		const run = startKernel(`
+			async function load() { return {}; }
+			async function execute(engine, job) {
+				output.image("x".repeat(MAX_IMAGE_CHARS + 1));
+				output.image("x".repeat(MAX_IMAGE_CHARS + 1));
+				const count = Number(job.files[ENTRY]);
+				for (let i = 0; i < count; i++) output.image("png" + i);
+			}
+		`);
+		const flooded = await run({ "/main.fake": String(RUNTIME_MAX_OUTPUT_IMAGES + 5) });
+		const images = flooded.filter((m) => m.type === "image");
+		expect(images).toHaveLength(RUNTIME_MAX_OUTPUT_IMAGES);
+		expect(images[0]).toMatchObject({ png: "png0" });
+		expect(outputs(flooded)).toEqual([
+			expect.stringContaining("stderr:An image is too large to show."),
+			`stderr:Only the first ${RUNTIME_MAX_OUTPUT_IMAGES} images show.`,
+		]);
+
+		// The limit is per run.
+		const next = await run({ "/main.fake": "1" });
+		expect(next.filter((m) => m.type === "image")).toHaveLength(1);
+	});
+
+	it("drops the images after the output is truncated", async () => {
+		const run = startKernel(`
+			async function load() { return {}; }
+			async function execute() {
+				for (let i = 0; i < MAX_LINES; i++) output.text("stdout", i + "\\n");
+				output.image("before");
+				output.text("stdout", "cut\\n");
+				output.image("after");
+			}
+		`);
+		const messages = await run(entryOnly);
+		expect(messages.filter((m) => m.type === "image")).toEqual([
+			expect.objectContaining({ png: "before" }),
 		]);
 	});
 
